@@ -126,15 +126,40 @@
     const msg = document.getElementById('msg');
     const btn = document.getElementById('submitBtn');
 
-    // When arriving from a reset email, Supabase sets a temporary session
-    // (via the tokens in the URL). Detect it; if absent, the link is bad.
+    // A reset link can deliver the token in several ways depending on the
+    // Supabase flow. Handle all of them:
+    //  1) PKCE flow: ?code=... in the query string -> exchange for a session
+    //  2) Implicit flow: #access_token=...&type=recovery in the URL hash
+    //  3) The PASSWORD_RECOVERY auth event fired by the SDK
     let hasSession = false;
-    const { data } = await supabase.auth.getSession();
-    if (data.session) {
-      hasSession = true;
-    } else {
-      // Give the SDK a moment to parse the URL hash, then re-check.
-      await new Promise(r => setTimeout(r, 400));
+
+    // Listen for the recovery event (fires when the SDK parses a recovery link).
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        hasSession = true;
+        formArea.classList.remove('hidden');
+        invalidArea.classList.add('hidden');
+      }
+    });
+
+    // 1) PKCE: exchange ?code=... for a session.
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+    if (code) {
+      try {
+        await supabase.auth.exchangeCodeForSession(code);
+      } catch (e) {
+        console.log('code exchange failed', e);
+      }
+    }
+
+    // 2/3) Give the SDK a moment to parse the hash / fire the event, then check.
+    if (!hasSession) {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) hasSession = true;
+    }
+    if (!hasSession) {
+      await new Promise(r => setTimeout(r, 800));
       const again = await supabase.auth.getSession();
       hasSession = !!again.data.session;
     }
